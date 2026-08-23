@@ -1,0 +1,9 @@
+.git
+.venv
+__pycache__
+*.egg-info
+frontend
+tests
+docs
+data/realieprep.db
+
