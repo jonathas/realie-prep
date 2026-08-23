@@ -1,0 +1,17 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body { @apply m-0 bg-cream font-sans text-ink antialiased; }
+  button, input { font: inherit; }
+  ::selection { @apply bg-sage-100; }
+}
+
+@layer components {
+  .card { @apply rounded-2xl border border-black/5 bg-white shadow-card; }
+  .btn-primary { @apply inline-flex items-center justify-center gap-2 rounded-xl bg-sage-700 px-5 py-3 font-semibold text-white transition hover:bg-sage-600 disabled:cursor-not-allowed disabled:opacity-50; }
+  .btn-secondary { @apply inline-flex items-center justify-center gap-2 rounded-xl border border-sage-700/20 bg-white px-5 py-3 font-semibold text-sage-700 transition hover:bg-sage-50 disabled:opacity-50; }
+  .eyebrow { @apply text-xs font-bold uppercase tracking-[0.18em] text-sage-600; }
+}
+

@@ -1,0 +1,26 @@
+import { ArrowDownRight, ArrowUpRight, Award, BookOpen, Brain, Target } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { api } from '../api'
+import { ErrorState, Loading } from '../components/States'
+import type { Stats } from '../types'
+
+const metric = (label: string, value: string, detail: string, Icon: typeof Target) => <div className="card p-5"><div className="flex items-start justify-between"><div><p className="text-sm text-black/45">{label}</p><p className="mt-2 font-serif text-3xl font-bold">{value}</p><p className="mt-1 text-xs text-black/40">{detail}</p></div><span className="rounded-xl bg-sage-50 p-2.5 text-sage-700"><Icon size={20}/></span></div></div>
+
+export function StatsPage() {
+  const [stats, setStats] = useState<Stats | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => { void api.get<Stats>('/api/stats').then(setStats).catch((cause: Error) => setError(cause.message)) }, [])
+  if (error) return <ErrorState message={error}/>
+  if (!stats) return <Loading/>
+  const passing = stats.passing_difference >= 0
+  return <section className="mx-auto max-w-6xl px-5 py-10 lg:py-14">
+    <p className="eyebrow">Your progress</p><div className="mt-2 flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><h1 className="font-serif text-4xl font-bold sm:text-5xl">Readiness, at a glance.</h1><div className={`inline-flex items-center gap-2 self-start rounded-full px-4 py-2 text-sm font-semibold ${passing ? 'bg-sage-100 text-sage-700' : 'bg-amber-100 text-amber-500'}`}>{passing ? <ArrowUpRight size={17}/> : <ArrowDownRight size={17}/>} {Math.abs(stats.passing_difference)} points {passing ? 'above' : 'below'} passing</div></div>
+    <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">{metric('First-attempt accuracy', `${stats.first_attempt_accuracy}%`, `${stats.passing_grade_percent}% passing threshold`, Target)}{metric('Overall accuracy', `${stats.overall_accuracy}%`, `${stats.correct} of ${stats.total_attempts} attempts`, Award)}{metric('Questions seen', `${stats.unique_seen}`, `${stats.unique_remaining} remaining`, BookOpen)}{metric('Knowledge mistakes', `${stats.mistakes.knowledge}`, `${stats.mistakes.vocabulary} vocabulary`, Brain)}</div>
+    <div className="card mt-6 p-6 sm:p-8"><div className="flex justify-between"><div><p className="eyebrow">Question bank coverage</p><p className="mt-2 text-sm text-black/50">{stats.unique_seen} of {stats.total_questions} unique questions</p></div><strong className="font-serif text-3xl text-sage-700">{stats.coverage_percent}%</strong></div><div className="mt-5 h-3 overflow-hidden rounded-full bg-black/5"><div className="h-full rounded-full bg-sage-600 transition-all" style={{ width: `${stats.coverage_percent}%` }}/></div></div>
+    <div className="mt-6 grid gap-6 lg:grid-cols-[1.5fr_1fr]">
+      <div className="card overflow-hidden"><div className="border-b border-black/5 p-6"><h2 className="font-serif text-2xl">Category performance</h2><p className="mt-1 text-sm text-black/45">First-attempt results are your clearest readiness signal.</p></div>{stats.categories.length ? <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="bg-sage-50 text-xs uppercase tracking-wide text-black/45"><tr><th className="px-6 py-3">Category</th><th className="px-4 py-3">First try</th><th className="px-4 py-3">Overall</th><th className="px-6 py-3 text-right">Attempts</th></tr></thead><tbody>{stats.categories.map((row) => <tr className="border-t border-black/5" key={row.category}><td className="max-w-xs px-6 py-4 font-medium">{row.category}</td><td className="px-4 py-4">{row.first_accuracy}%</td><td className="px-4 py-4 text-black/50">{row.overall_accuracy}%</td><td className="px-6 py-4 text-right text-black/50">{row.attempts}</td></tr>)}</tbody></table></div> : <p className="p-8 text-black/45">Complete your first batch to see category insights.</p>}</div>
+      <div className="space-y-6"><div className="card p-6"><h2 className="font-serif text-2xl">Mistake patterns</h2><div className="mt-5 space-y-4">{([['Vocabulary', stats.mistakes.vocabulary], ['Knowledge', stats.mistakes.knowledge], ['Careless', stats.mistakes.careless], ['Not sure', stats.mistakes.unknown]] as const).map(([label, count]) => <div className="flex items-center justify-between" key={label}><span className="text-sm text-black/55">{label}</span><strong>{count}</strong></div>)}</div></div><div className="card p-6"><h2 className="font-serif text-2xl">Missed twice</h2><p className="mt-1 text-sm text-black/45">Questions worth revisiting soon.</p><div className="mt-4 space-y-3">{stats.missed_twice.slice(0, 5).map((item) => <div className="rounded-xl bg-red-50/60 p-3" key={item.question_id}><p className="line-clamp-2 text-sm font-medium">{item.question}</p><p className="mt-1 text-xs text-red-700">{item.incorrect_attempts} misses · {item.category}</p></div>)}{!stats.missed_twice.length && <p className="text-sm text-black/40">Nothing here yet—nice work.</p>}</div></div></div>
+    </div>
+  </section>
+}
+
