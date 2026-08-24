@@ -53,11 +53,16 @@ class OptionOut(BaseModel):
 
 class QuestionOut(BaseModel):
     id: int
+    question_id: int
     stable_key: str
     category: str
     text: str
     image_path: str | None = None
     options: list[OptionOut]
+    selected_option: OptionLabel | None = None
+    correct_option: OptionLabel | None = None
+    correct: bool | None = None
+    mistake_type: Literal["vocabulary", "knowledge", "careless", "unknown"] | None = None
 
 
 class BatchOut(BaseModel):
@@ -67,6 +72,8 @@ class BatchOut(BaseModel):
     allow_repeats: bool
     selection_mode: str
     questions: list[QuestionOut]
+    score: int | None = None
+    accuracy: float | None = None
 
 
 class SessionOut(BaseModel):

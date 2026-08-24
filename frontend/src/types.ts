@@ -3,8 +3,8 @@ export type MistakeType = 'vocabulary' | 'knowledge' | 'careless' | 'unknown'
 export type SelectionMode = 'unseen' | 'mixed' | 'weak_topics' | 'incorrect' | 'missed_twice'
 
 export interface QuestionOption { label: OptionLabel; text: string; image_path: string | null }
-export interface Question { id: number; stable_key: string; category: string; text: string; image_path: string | null; options: QuestionOption[] }
-export interface Batch { id: number; batch_number: number; submitted: boolean; allow_repeats: boolean; selection_mode: SelectionMode; questions: Question[] }
+export interface Question { id: number; question_id: number; stable_key: string; category: string; text: string; image_path: string | null; options: QuestionOption[]; selected_option: OptionLabel | null; correct_option: OptionLabel | null; correct: boolean | null; mistake_type: MistakeType | null }
+export interface Batch { id: number; batch_number: number; submitted: boolean; allow_repeats: boolean; selection_mode: SelectionMode; questions: Question[]; score: number | null; accuracy: number | null }
 export interface QuizSession { id: number; date: string; batches: Batch[]; bank_empty: boolean }
 export interface AnswerResult { question_view_id: number; question_id: number; selected_option: OptionLabel; correct_option: OptionLabel; correct: boolean }
 export interface BatchResult { score: number; total: number; accuracy: number; results: AnswerResult[] }

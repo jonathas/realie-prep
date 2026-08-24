@@ -246,11 +246,14 @@ class QuizService:
                 .options(
                     joinedload(QuestionView.question).joinedload(Question.options),
                     joinedload(QuestionView.question).joinedload(Question.category),
+                    joinedload(QuestionView.attempt),
                 )
                 .where(QuestionView.quiz_batch_id == batch.id)
                 .order_by(QuestionView.id)
             ).unique()
         )
+        attempts = [view.attempt for view in views if view.attempt is not None]
+        score = sum(attempt.correct for attempt in attempts)
         return BatchOut(
             id=batch.id,
             batch_number=batch.batch_number,
@@ -260,6 +263,7 @@ class QuizService:
             questions=[
                 QuestionOut(
                     id=view.id,
+                    question_id=view.question_id,
                     stable_key=view.question.stable_key,
                     category=view.question.category.name,
                     text=view.question.text,
@@ -268,7 +272,15 @@ class QuizService:
                         OptionOut(label=o.label, text=o.text, image_path=o.image_path)
                         for o in view.question.options
                     ],
+                    selected_option=view.attempt.selected_option if view.attempt else None,
+                    correct_option=view.question.correct_option if view.attempt else None,
+                    correct=view.attempt.correct if view.attempt else None,
+                    mistake_type=view.attempt.mistake_type if view.attempt else None,
                 )
                 for view in views
             ],
+            score=score if batch.submitted_at is not None else None,
+            accuracy=(round(score / len(attempts) * 100, 1) if attempts else 0.0)
+            if batch.submitted_at is not None
+            else None,
         )

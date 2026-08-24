@@ -12,6 +12,8 @@ def test_unseen_batches_do_not_overlap(
 ) -> None:
     service = QuizService(db, settings)
     first = service.get_or_create_current().batches[0]
+    assert all(question.selected_option is None for question in first.questions)
+    assert first.score is None
     first_question_ids = {
         view.question_id
         for view in db.scalars(select(QuestionView).where(QuestionView.quiz_batch_id == first.id))
@@ -45,3 +47,11 @@ def test_grading_persists_every_answer(
     result = service.submit(batch.id, submission)
     assert (result.score, result.total, result.accuracy) == (8, 10, 80.0)
     assert len(list(db.scalars(select(AnswerAttempt)))) == 10
+
+    restored = service.get_or_create_current().batches[0]
+    assert restored.submitted is True
+    assert restored.score == 8
+    assert restored.accuracy == 80.0
+    assert [question.selected_option for question in restored.questions] == ["A"] * 8 + ["B"] * 2
+    assert [question.correct for question in restored.questions] == [True] * 8 + [False] * 2
+    assert all(question.correct_option == "A" for question in restored.questions)

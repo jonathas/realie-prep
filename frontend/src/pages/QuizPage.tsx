@@ -6,6 +6,34 @@ import { ErrorState, Loading } from '../components/States'
 import type { Batch, BatchResult, MistakeType, OptionLabel, QuizSession, SelectionMode } from '../types'
 
 const mistakeLabels: Record<MistakeType, string> = { vocabulary: 'Vocabulary', knowledge: "Didn't know", careless: 'Careless', unknown: 'Not sure' }
+const optionLabels = new Set<OptionLabel>(['A', 'B', 'C', 'D'])
+const draftKey = (sessionId: number, batchId: number) => `realieprep:draft:${sessionId}:${batchId}`
+
+function readDraft(sessionId: number, batch: Batch): Record<number, OptionLabel> {
+  try {
+    const stored = JSON.parse(localStorage.getItem(draftKey(sessionId, batch.id)) ?? '{}') as Record<string, unknown>
+    return Object.fromEntries(batch.questions.flatMap((question) => {
+      const value = stored[String(question.id)]
+      return typeof value === 'string' && optionLabels.has(value as OptionLabel) ? [[question.id, value as OptionLabel]] : []
+    }))
+  } catch {
+    localStorage.removeItem(draftKey(sessionId, batch.id))
+    return {}
+  }
+}
+
+function savedResult(batch: Batch): BatchResult | undefined {
+  if (!batch.submitted || batch.questions.some((question) => question.selected_option === null || question.correct_option === null || question.correct === null)) return undefined
+  const results = batch.questions.map((question) => ({
+    question_view_id: question.id,
+    question_id: question.question_id,
+    selected_option: question.selected_option!,
+    correct_option: question.correct_option!,
+    correct: question.correct!,
+  }))
+  const score = batch.score ?? results.filter((result) => result.correct).length
+  return { score, total: results.length, accuracy: batch.accuracy ?? (results.length ? Math.round(score / results.length * 1000) / 10 : 0), results }
+}
 
 export function QuizPage() {
   const [session, setSession] = useState<QuizSession | null>(null)
@@ -17,10 +45,35 @@ export function QuizPage() {
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
-    try { setError(null); setSession(await api.get<QuizSession>('/api/quiz/today')) }
+    try {
+      setError(null)
+      const next = await api.get<QuizSession>('/api/quiz/today')
+      const restoredAnswers: Record<number, OptionLabel> = {}
+      const restoredResults: Record<number, BatchResult> = {}
+      next.batches.forEach((batch) => {
+        if (batch.submitted) {
+          batch.questions.forEach((question) => { if (question.selected_option) restoredAnswers[question.id] = question.selected_option })
+          const result = savedResult(batch)
+          if (result) restoredResults[batch.id] = result
+        } else {
+          Object.assign(restoredAnswers, readDraft(next.id, batch))
+        }
+      })
+      setAnswers(restoredAnswers)
+      setResults(restoredResults)
+      setSession(next)
+    }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not load your study session') }
   }, [])
   useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    if (!session) return
+    session.batches.filter((batch) => !batch.submitted).forEach((batch) => {
+      const draft = Object.fromEntries(batch.questions.flatMap((question) => answers[question.id] ? [[question.id, answers[question.id]]] : []))
+      if (Object.keys(draft).length) localStorage.setItem(draftKey(session.id, batch.id), JSON.stringify(draft))
+      else localStorage.removeItem(draftKey(session.id, batch.id))
+    })
+  }, [answers, session])
 
   const active = useMemo(() => session?.batches.find((batch) => !batch.submitted) ?? null, [session])
   const submit = async (batch: Batch) => {
@@ -29,7 +82,9 @@ export function QuizPage() {
     try {
       const result = await api.post<BatchResult>(`/api/quiz/batches/${batch.id}/submit`, { answers: batch.questions.map((q) => ({ question_view_id: q.id, selected_option: answers[q.id] })) })
       setResults((current) => ({ ...current, [batch.id]: result }))
-      setSession((current) => current ? { ...current, batches: current.batches.map((item) => item.id === batch.id ? { ...item, submitted: true } : item) } : current)
+      if (session) localStorage.removeItem(draftKey(session.id, batch.id))
+      const byView = new Map(result.results.map((answer) => [answer.question_view_id, answer]))
+      setSession((current) => current ? { ...current, batches: current.batches.map((item) => item.id === batch.id ? { ...item, submitted: true, score: result.score, accuracy: result.accuracy, questions: item.questions.map((question) => { const answer = byView.get(question.id); return answer ? { ...question, selected_option: answer.selected_option, correct_option: answer.correct_option, correct: answer.correct } : question }) } : item) } : current)
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not submit answers') }
     finally { setBusy(false) }
   }
@@ -44,6 +99,7 @@ export function QuizPage() {
   }
   const classify = async (viewId: number, mistakeType: MistakeType) => {
     await api.patch<void>(`/api/quiz/views/${viewId}/mistake`, { mistake_type: mistakeType })
+    setSession((current) => current ? { ...current, batches: current.batches.map((batch) => ({ ...batch, questions: batch.questions.map((question) => question.id === viewId ? { ...question, mistake_type: mistakeType } : question) })) } : current)
   }
 
   if (!session && !error) return <Loading />
@@ -73,7 +129,7 @@ export function QuizPage() {
               <span className="flex-1"><span className={option.image_path ? 'sr-only' : ''}>{option.text}</span>{option.image_path && <img className="max-h-36 w-full rounded-lg object-contain" src={option.image_path} alt={`Option ${option.label}`}/>}</span>
             </button>
           })}</div>
-          {answerResult && !answerResult.correct && <div className="mt-5 rounded-xl bg-red-50/70 p-4"><p className="text-sm font-semibold text-red-800">Your answer: {answerResult.selected_option} · Correct: {answerResult.correct_option}</p><p className="mt-3 text-xs font-semibold uppercase tracking-wide text-black/45">Why did you miss this?</p><div className="mt-2 flex flex-wrap gap-2">{(Object.keys(mistakeLabels) as MistakeType[]).map((kind) => <button key={kind} className="rounded-lg border border-black/10 bg-white px-3 py-2 text-xs font-semibold hover:border-sage-500" onClick={(event) => { const target = event.currentTarget; void classify(question.id, kind).then(() => target.classList.add('border-sage-500', 'bg-sage-50')) }}>{mistakeLabels[kind]}</button>)}</div></div>}
+          {answerResult && !answerResult.correct && <div className="mt-5 rounded-xl bg-red-50/70 p-4"><p className="text-sm font-semibold text-red-800">Your answer: {answerResult.selected_option} · Correct: {answerResult.correct_option}</p><p className="mt-3 text-xs font-semibold uppercase tracking-wide text-black/45">Why did you miss this?</p><div className="mt-2 flex flex-wrap gap-2">{(Object.keys(mistakeLabels) as MistakeType[]).map((kind) => <button key={kind} className={`rounded-lg border px-3 py-2 text-xs font-semibold hover:border-sage-500 ${question.mistake_type === kind ? 'border-sage-500 bg-sage-50' : 'border-black/10 bg-white'}`} onClick={() => void classify(question.id, kind)}>{mistakeLabels[kind]}</button>)}</div></div>}
         </article>
       })}</div>
       {!visibleBatch.submitted ? <div className="sticky bottom-4 mt-6 rounded-2xl border border-white/60 bg-white/90 p-4 shadow-card backdrop-blur"><button className="btn-primary w-full" disabled={busy || visibleBatch.questions.some((q) => !answers[q.id])} onClick={() => void submit(visibleBatch)}>{busy ? 'Checking…' : `Submit answers (${visibleBatch.questions.filter((q) => answers[q.id]).length}/${visibleBatch.questions.length})`}<ArrowRight size={18}/></button></div>
