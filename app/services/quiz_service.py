@@ -1,6 +1,7 @@
 from datetime import date
 
 from sqlalchemy import case, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from app.config import Settings
@@ -31,6 +32,10 @@ class QuizError(ValueError):
     pass
 
 
+class ConcurrentQuizError(QuizError):
+    pass
+
+
 class QuestionSelectionService:
     def __init__(self, db: Session, settings: Settings) -> None:
         self.db = db
@@ -49,31 +54,45 @@ class QuestionSelectionService:
         )
 
     def _review_ids(self, limit: int, mode: SelectionMode) -> list[int]:
-        incorrect_count = func.sum(case((AnswerAttempt.correct.is_(False), 1), else_=0))
-        last_seen = func.max(QuestionView.shown_at)
-        query = (
-            select(Question.id)
-            .outerjoin(AnswerAttempt, AnswerAttempt.question_id == Question.id)
-            .outerjoin(QuestionView, QuestionView.question_id == Question.id)
-            .group_by(Question.id)
-        )
-        if mode == SelectionMode.MISSED_TWICE:
-            query = query.having(incorrect_count >= 2).order_by(incorrect_count.desc(), last_seen)
-        elif mode == SelectionMode.INCORRECT:
-            query = query.having(incorrect_count >= 1).order_by(incorrect_count.desc(), last_seen)
-        elif mode == SelectionMode.WEAK_TOPICS:
-            eligible = (
-                select(Category.id)
-                .join(Question, Question.category_id == Category.id)
-                .join(AnswerAttempt, AnswerAttempt.question_id == Question.id)
-                .group_by(Category.id)
-                .having(func.count(AnswerAttempt.id) >= self.settings.weak_topic_min_attempts)
-                .order_by(func.avg(case((AnswerAttempt.correct.is_(True), 1.0), else_=0.0)))
-                .limit(3)
+        incorrect_count = (
+            select(func.count(AnswerAttempt.id))
+            .where(
+                AnswerAttempt.question_id == Question.id,
+                AnswerAttempt.correct.is_(False),
             )
-            query = query.where(Question.category_id.in_(eligible)).order_by(last_seen)
+            .correlate(Question)
+            .scalar_subquery()
+        )
+        last_seen = (
+            select(func.max(QuestionView.shown_at))
+            .where(QuestionView.question_id == Question.id)
+            .correlate(Question)
+            .scalar_subquery()
+        )
+        weak_categories = (
+            select(Category.id)
+            .join(Question, Question.category_id == Category.id)
+            .join(AnswerAttempt, AnswerAttempt.question_id == Question.id)
+            .group_by(Category.id)
+            .having(func.count(AnswerAttempt.id) >= self.settings.weak_topic_min_attempts)
+            .order_by(func.avg(case((AnswerAttempt.correct.is_(True), 1.0), else_=0.0)))
+            .limit(3)
+        )
+        query = select(Question.id)
+        if mode == SelectionMode.MISSED_TWICE:
+            query = query.where(incorrect_count >= 2).order_by(incorrect_count.desc(), last_seen)
+        elif mode == SelectionMode.INCORRECT:
+            query = query.where(incorrect_count >= 1).order_by(incorrect_count.desc(), last_seen)
+        elif mode == SelectionMode.WEAK_TOPICS:
+            query = query.where(Question.category_id.in_(weak_categories)).order_by(last_seen)
         else:
-            query = query.order_by(incorrect_count.desc(), last_seen)
+            priority = case(
+                (incorrect_count >= 2, 0),
+                (Question.category_id.in_(weak_categories), 1),
+                (incorrect_count >= 1, 2),
+                else_=3,
+            )
+            query = query.order_by(priority, incorrect_count.desc(), last_seen)
         return list(self.db.scalars(query.limit(limit)))
 
     def select_ids(self, limit: int, allow_repeats: bool, mode: SelectionMode) -> list[int]:
@@ -111,7 +130,15 @@ class QuizService:
         if session is None:
             session = QuizSession(session_date=today)
             self.db.add(session)
-            self.db.commit()
+            try:
+                self.db.commit()
+            except IntegrityError:
+                self.db.rollback()
+                session = self.db.scalar(
+                    select(QuizSession).where(QuizSession.session_date == today)
+                )
+                if session is None:
+                    raise
         return session
 
     def get_or_create_current(self) -> SessionOut:
@@ -124,7 +151,10 @@ class QuizService:
             )
         )
         if not batches and self.db.scalar(select(func.count(Question.id))):
-            self.create_batch(session, NewBatchIn())
+            try:
+                self.create_batch(session, NewBatchIn())
+            except ConcurrentQuizError:
+                self.db.expire_all()
         return self.serialize_session(session)
 
     def create_batch(self, session: QuizSession, request: NewBatchIn) -> QuizBatch:
@@ -143,24 +173,42 @@ class QuizService:
             allow_repeats=request.allow_repeats,
             selection_mode=request.mode.value,
         )
-        self.db.add(batch)
-        # Flush before selection to acquire SQLite's writer lock. PostgreSQL uses
-        # row locking in the selector. The view records commit with this batch.
-        self.db.flush()
-        ids = self.selector.select_ids(10, request.allow_repeats, request.mode)
-        if not ids:
-            self.db.rollback()
-            raise QuizError("No questions are available for this study mode")
-        previously_seen = set(
-            self.db.scalars(
-                select(QuestionView.question_id).where(QuestionView.question_id.in_(ids))
+        try:
+            self.db.add(batch)
+            # Flush before selection to acquire SQLite's writer lock. PostgreSQL uses
+            # row locking in the selector. The view records commit with this batch.
+            self.db.flush()
+            ids = self.selector.select_ids(10, request.allow_repeats, request.mode)
+            if not ids:
+                self.db.rollback()
+                raise QuizError("No questions are available for this study mode")
+            previously_seen = set(
+                self.db.scalars(
+                    select(QuestionView.question_id).where(QuestionView.question_id.in_(ids))
+                )
             )
-        )
-        self.db.add_all(
-            QuestionView(question_id=qid, quiz_batch_id=batch.id, was_repeat=qid in previously_seen)
-            for qid in ids
-        )
-        self.db.commit()
+            self.db.add_all(
+                QuestionView(
+                    question_id=qid,
+                    quiz_batch_id=batch.id,
+                    was_repeat=qid in previously_seen,
+                )
+                for qid in ids
+            )
+            self.db.commit()
+        except IntegrityError as exc:
+            self.db.rollback()
+            concurrent_batch = self.db.scalar(
+                select(QuizBatch).where(
+                    QuizBatch.quiz_session_id == session.id,
+                    QuizBatch.batch_number == batch.batch_number,
+                )
+            )
+            if concurrent_batch is not None:
+                raise ConcurrentQuizError(
+                    "Another request already created the next batch"
+                ) from exc
+            raise
         return batch
 
     def new_batch(self, request: NewBatchIn) -> BatchOut:
@@ -181,7 +229,7 @@ class QuizService:
             ).unique()
         )
         answers = {answer.question_view_id: answer.selected_option for answer in submission.answers}
-        if set(answers) != {view.id for view in views}:
+        if len(answers) != len(submission.answers) or set(answers) != {view.id for view in views}:
             raise QuizError("Every question in the batch must be answered exactly once")
         results: list[AnswerResult] = []
         for view in views:
@@ -206,7 +254,14 @@ class QuizService:
                 )
             )
         batch.submitted_at = utcnow()
-        self.db.commit()
+        try:
+            self.db.commit()
+        except IntegrityError as exc:
+            self.db.rollback()
+            persisted_batch = self.db.get(QuizBatch, batch_id)
+            if persisted_batch is not None and persisted_batch.submitted_at is not None:
+                raise ConcurrentQuizError("This batch was already submitted") from exc
+            raise
         score = sum(result.correct for result in results)
         return BatchResult(
             score=score,
