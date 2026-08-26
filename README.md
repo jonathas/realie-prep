@@ -143,6 +143,10 @@ Verification:
 cd frontend && npm run build && npm run lint
 ```
 
+GitHub Actions runs these checks and a clean Docker build and startup test on every push and pull
+request. The Docker check starts with an empty data directory and does not download the official
+question bank.
+
 ## Database migrations
 
 Create an Alembic migration after every model change:
