@@ -1,6 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -16,6 +17,7 @@ class Settings(BaseSettings):
     expected_questions_per_category: int = 10
     passing_grade_percent: float = 60
     weak_topic_min_attempts: int = 5
+    app_timezone: str = "Europe/Prague"
     admin_password: str = ""
     cors_origins: Annotated[list[str], NoDecode] = [
         "http://localhost:5173",
@@ -23,6 +25,17 @@ class Settings(BaseSettings):
     ]
     upload_dir: Path = Path("./data/uploads")
     official_bank_url: str = "https://cestina-pro-cizince.cz/obcanstvi/databanka-uloh/"
+
+    @field_validator("app_timezone")
+    @classmethod
+    def validate_timezone(cls, value: str) -> str:
+        if not value or value != value.strip():
+            raise ValueError("Timezone must be a non-empty IANA timezone name")
+        try:
+            ZoneInfo(value)
+        except (ValueError, ZoneInfoNotFoundError) as exc:
+            raise ValueError(f"Unknown IANA timezone: {value}") from exc
+        return value
 
     @field_validator("cors_origins", mode="before")
     @classmethod

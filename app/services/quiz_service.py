@@ -1,4 +1,5 @@
-from datetime import date
+from datetime import UTC, date, datetime
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import case, func, select
 from sqlalchemy.exc import IntegrityError
@@ -34,6 +35,13 @@ class QuizError(ValueError):
 
 class ConcurrentQuizError(QuizError):
     pass
+
+
+def current_study_date(settings: Settings, instant: datetime | None = None) -> date:
+    current = instant or datetime.now(UTC)
+    if current.tzinfo is None:
+        raise ValueError("Study-date calculation requires a timezone-aware datetime")
+    return current.astimezone(ZoneInfo(settings.app_timezone)).date()
 
 
 class QuestionSelectionService:
@@ -125,7 +133,7 @@ class QuizService:
         self.selector = QuestionSelectionService(db, settings)
 
     def today(self) -> QuizSession:
-        today = date.today()
+        today = current_study_date(self.settings)
         session = self.db.scalar(select(QuizSession).where(QuizSession.session_date == today))
         if session is None:
             session = QuizSession(session_date=today)
