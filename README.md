@@ -48,6 +48,7 @@ Container recreation preserves the downloaded bank and study progress in `./data
 | `EXPECTED_QUESTIONS_PER_CATEGORY` | `10` | Required questions per topic |
 | `PASSING_GRADE_PERCENT` | `60` | Readiness threshold shown in stats |
 | `WEAK_TOPIC_MIN_ATTEMPTS` | `5` | Minimum sample before weak-topic ranking |
+| `APP_TIMEZONE` | `Europe/Prague` | IANA timezone that determines the current study day |
 | `ADMIN_PASSWORD` | empty | Optional locally stored password for admin API access |
 | `UPLOAD_DIR` | `./data/uploads` | Temporary validated import previews |
 | `OFFICIAL_BANK_URL` | official NPI database URL | Source checked by admin sync |
@@ -169,7 +170,8 @@ output. Normal users should use the validated Admin workflow instead.
 ## Architecture and API
 
 See [architecture](docs/architecture.md) and the [database model](docs/database.md). Interactive
-OpenAPI documentation is available at `/docs` on the backend service.
+OpenAPI documentation is available through the web service at `/docs`; the schema is available at
+`/openapi.json`, and ReDoc is available at `/redoc`.
 
 ## Source content and rights
 

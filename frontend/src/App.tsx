@@ -2,6 +2,7 @@ import { BarChart3, BookOpenCheck, Menu, Settings, X } from 'lucide-react'
 import { useState } from 'react'
 import { Link, NavLink, Route, Routes } from 'react-router-dom'
 import { AdminPage } from './pages/AdminPage'
+import { NotFoundPage } from './pages/NotFoundPage'
 import { QuizPage } from './pages/QuizPage'
 import { StatsPage } from './pages/StatsPage'
 
@@ -27,8 +28,7 @@ export default function App() {
       </div>
       {open && <nav className="border-t border-black/5 bg-cream px-5 py-3 md:hidden">{nav.map(({ to, label, icon: Icon }) => <NavLink key={to} to={to} end={to === '/'} onClick={() => setOpen(false)} className="flex items-center gap-3 rounded-xl px-3 py-3 font-semibold"><Icon size={18}/>{label}</NavLink>)}</nav>}
     </header>
-    <main><Routes><Route path="/" element={<QuizPage/>}/><Route path="/stats" element={<StatsPage/>}/><Route path="/admin" element={<AdminPage/>}/></Routes></main>
+    <main><Routes><Route path="/" element={<QuizPage/>}/><Route path="/stats" element={<StatsPage/>}/><Route path="/admin" element={<AdminPage/>}/><Route path="*" element={<NotFoundPage/>}/></Routes></main>
     <footer className="mx-auto max-w-6xl px-5 py-10 text-center text-sm text-black/40">RealiePrep · Your data stays on your server</footer>
   </div>
 }
-

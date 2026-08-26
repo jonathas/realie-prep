@@ -11,9 +11,8 @@ export default {
         amber: { 100: '#f8ead0', 500: '#c7862f' },
       },
       boxShadow: { card: '0 14px 40px rgba(28, 45, 34, 0.08)' },
-      fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui'], serif: ['Lora', 'Georgia', 'serif'] },
+      fontFamily: { sans: ['Inter Variable', 'ui-sans-serif', 'system-ui'], serif: ['Lora Variable', 'Georgia', 'serif'] },
     },
   },
   plugins: [],
 } satisfies Config
-

@@ -78,6 +78,9 @@ jobs:
       - name: Lint frontend
         run: npm run lint
 
+      - name: Test frontend
+        run: npm test
+
   docker:
     name: Docker
     runs-on: ubuntu-latest
