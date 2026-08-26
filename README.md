@@ -52,6 +52,43 @@ Container recreation preserves the downloaded bank and study progress in `./data
 | `UPLOAD_DIR` | `./data/uploads` | Temporary validated import previews |
 | `OFFICIAL_BANK_URL` | official NPI database URL | Source checked by admin sync |
 
+## Home server and LAN hosting
+
+The default `127.0.0.1` binding is intentionally accessible only from the machine running
+RealiePrep. To run it on a home server and use it from a laptop, phone, or another computer, edit
+the server's `.env` file:
+
+```env
+BIND_ADDRESS=0.0.0.0
+APP_PORT=8000
+ADMIN_PASSWORD=replace-with-a-long-random-secret
+```
+
+You can generate an admin password on the server with:
+
+```bash
+openssl rand -hex 32
+```
+
+Apply the configuration:
+
+```bash
+docker compose up -d --build
+```
+
+Then open `http://<server-ip>:8000` from another device on the same network—for example,
+`http://192.168.1.50:8000`. If mDNS is available, a hostname such as
+`http://my-server.local:8000` may also work. On Linux, `hostname -I` usually shows the server's LAN
+address.
+
+Do not forward port 8000 from your router to the public internet. For remote access, prefer a
+private VPN such as Tailscale. If you deliberately publish RealiePrep through a reverse proxy, use
+HTTPS and keep a strong `ADMIN_PASSWORD`; the password is sent in an HTTP request header. Ensure
+the host firewall permits port 8000 only from networks that should have access.
+
+Back up `DATA_DIR`—by default `./data`—to preserve the downloaded question bank, answers, and
+statistics. Updating or recreating containers does not remove this directory.
+
 ## Studying and repetition
 
 Opening Study creates—or returns—the current unsubmitted batch. Refreshing does not consume
@@ -61,9 +98,6 @@ is: missed twice, weakest categories, previously incorrect, then least recently 
 
 Overall accuracy uses every attempt. First-attempt accuracy uses only the earliest attempt for
 each question and is the primary passing-grade comparison.
-
-If you intentionally expose RealiePrep to a LAN or the internet, change `BIND_ADDRESS` and set a
-strong `ADMIN_PASSWORD`. RealiePrep is a single-user application and is private/local by default.
 
 ## Downloading and updating the official bank
 
