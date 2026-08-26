@@ -5,6 +5,8 @@ repository and container images contain no official questions or images. On firs
 administrator can explicitly download the bank from NPI ČR into the installation's private
 local data volume.
 
+![RealiePrep study interface](docs/screenshot.png)
+
 The app serves a strict-TypeScript React interface through Nginx and a typed FastAPI API.
 Question selection, grading, repetition, and statistics are deterministic Python/SQL—not AI.
 
