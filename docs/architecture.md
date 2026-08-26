@@ -24,5 +24,7 @@ The React application is built by Vite and served by Nginx. Nginx proxies `/api`
 FastAPI route handlers delegate synchronization, quiz, and statistics behavior to services.
 SQLAlchemy models provide database-neutral persistence. SQLite is the default.
 
-The shipped seed is copied into the persistent data volume only when no runtime database exists.
-Normal startup never overwrites progress.
+The application image contains no official questions or images. A new installation starts with an
+empty migrated database. An administrator explicitly requests a download from NPI; validated content
+and assets are then cached in the private persistent data volume. Normal startup never accesses the
+official site or overwrites progress.

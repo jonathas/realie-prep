@@ -13,11 +13,11 @@ services:
       UPLOAD_DIR: ./data/uploads
       OFFICIAL_BANK_URL: ${OFFICIAL_BANK_URL:-https://cestina-pro-cizince.cz/obcanstvi/databanka-uloh/}
     volumes:
-      - ./data:/app/data
+      - ${DATA_DIR:-./data}:/app/data
   web:
     build: ./frontend
     restart: unless-stopped
     depends_on:
       - api
     ports:
-      - "8000:80"
+      - "${BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-8000}:80"

@@ -104,7 +104,7 @@ export function QuizPage() {
 
   if (!session && !error) return <Loading />
   if (!session) return <ErrorState message={error!} retry={() => void load()} />
-  if (session.bank_empty) return <section className="mx-auto max-w-3xl px-5 py-20 text-center"><div className="card p-10 sm:p-14"><span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-sage-100 text-sage-700"><CircleAlert/></span><h1 className="mt-6 font-serif text-3xl">Your question bank is empty</h1><p className="mx-auto mt-3 max-w-lg text-black/55">Sync the official online Reálie database in Admin. RealiePrep validates the complete bank before adding any questions.</p><Link className="btn-primary mt-7" to="/admin">Open Admin <ArrowRight size={18}/></Link></div></section>
+  if (session.bank_empty) return <section className="mx-auto max-w-3xl px-5 py-20 text-center"><div className="card p-10 sm:p-14"><span className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-sage-100 text-sage-700"><CircleAlert/></span><h1 className="mt-6 font-serif text-3xl">Download the question bank</h1><p className="mx-auto mt-3 max-w-lg text-black/55">RealiePrep ships without NPI’s copyrighted questions. Open Admin to download the official bank directly into your private local data volume.</p><Link className="btn-primary mt-7" to="/admin">Open Admin <ArrowRight size={18}/></Link></div></section>
 
   const visibleBatch = active ?? session.batches.at(-1)
   const result = visibleBatch ? results[visibleBatch.id] : undefined

@@ -1,15 +1,16 @@
 # RealiePrep
 
-RealiePrep is a self-hosted study app for the Czech citizenship **Reálie** exam. It
-ships with a validated database of the 300 questions retrieved from the official NPI ČR
-online question bank, so a new installation is ready to study immediately.
+RealiePrep is a self-hosted study app for the Czech citizenship **Reálie** exam. The
+repository and container images contain no official questions or images. On first use, an
+administrator can explicitly download the bank from NPI ČR into the installation's private
+local data volume.
 
 The app serves a strict-TypeScript React interface through Nginx and a typed FastAPI API.
 Question selection, grading, repetition, and statistics are deterministic Python/SQL—not AI.
 
 ## Features
 
-- Bundled 300-question, 30-topic bank with visual questions
+- User-initiated download from the official 300-question, 30-topic bank
 - Unseen-first batches of 10 with no accidental repetition
 - Refresh-safe daily sessions and “Show 10 more”
 - Intentional repetition and focused review modes
@@ -27,20 +28,27 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-Open <http://localhost:8000>. On first start, the backend copies the bundled seed into
-`./data/realieprep.db`. Later container recreation preserves your progress in that file.
+Open <http://localhost:8000>. On first start, the backend creates an empty migrated database at
+`./data/realieprep.db`. Open **Admin**, acknowledge the official source, and choose
+**Download official bank**. The app validates a preview before installing it locally.
+
+By default Docker binds only to `127.0.0.1`, so it is not reachable from other machines.
+Container recreation preserves the downloaded bank and study progress in `./data`.
 
 ## Configuration
 
 | Variable | Default | Purpose |
 |---|---:|---|
 | `DATABASE_URL` | `sqlite:///./data/realieprep.db` | SQLAlchemy database URL |
+| `BIND_ADDRESS` | `127.0.0.1` | Host interface exposed by Docker Compose |
+| `APP_PORT` | `8000` | Host port exposed by Docker Compose |
+| `DATA_DIR` | `./data` | Private host directory for the local bank and study progress |
 | `EXPECTED_QUESTION_COUNT` | `300` | Required imported question count |
 | `EXPECTED_CATEGORY_COUNT` | `30` | Required imported topic count |
 | `EXPECTED_QUESTIONS_PER_CATEGORY` | `10` | Required questions per topic |
 | `PASSING_GRADE_PERCENT` | `60` | Readiness threshold shown in stats |
 | `WEAK_TOPIC_MIN_ATTEMPTS` | `5` | Minimum sample before weak-topic ranking |
-| `ADMIN_PASSWORD` | empty | Optional password for admin API access |
+| `ADMIN_PASSWORD` | empty | Optional locally stored password for admin API access |
 | `UPLOAD_DIR` | `./data/uploads` | Temporary validated import previews |
 | `OFFICIAL_BANK_URL` | official NPI database URL | Source checked by admin sync |
 
@@ -54,12 +62,21 @@ is: missed twice, weakest categories, previously incorrect, then least recently 
 Overall accuracy uses every attempt. First-attempt accuracy uses only the earliest attempt for
 each question and is the primary passing-grade comparison.
 
-## Updating the official bank
+If you intentionally expose RealiePrep to a LAN or the internet, change `BIND_ADDRESS` and set a
+strong `ADMIN_PASSWORD`. RealiePrep is a single-user application and is private/local by default.
 
-Open **Admin** and select **Check official source**. RealiePrep deterministically reads the
-structured HTML, downloads its visual assets, and previews the result. Synchronization requires
-exactly 300 questions, 30 topics, four A/B/C/D choices, unique stable IDs, and one valid answer
-per question. Confirmation replaces the bank and resets study progress transactionally.
+## Downloading and updating the official bank
+
+New installations start empty and make no automatic request to NPI. Open **Admin**, review the
+source notice, and explicitly select **Download official bank**. RealiePrep then reads the official
+structured HTML directly, downloads its visual assets, and previews the result. Synchronization
+requires exactly 300 questions, 30 topics, four A/B/C/D choices, unique stable IDs, and one valid
+answer per question. Confirmation caches the bank in `./data`; ordinary startup and study sessions
+never contact NPI.
+
+Later, **Check official source** performs a user-requested update check. An identical canonical
+bank is rejected as already current. Confirming changed content replaces the local bank and resets
+study progress transactionally.
 
 No PDF, OCR, or AI is involved. If NPI changes the website markup, the sync fails safely and the
 current bank stays active. Identical canonical bank hashes are recognized as already up to date.
@@ -101,18 +118,15 @@ Create an Alembic migration after every model change:
 .venv/bin/alembic upgrade head
 ```
 
-## Rebuilding the bundled bank
+## Scraper maintenance
 
 ```bash
 .venv/bin/python scripts/scrape_official_site.py \
-  --output /tmp/questions.json --assets frontend/public/question-images
-.venv/bin/python scripts/build_seed.py /tmp/questions.json data/realieprep_seed.db \
-  --source-url https://cestina-pro-cizince.cz/obcanstvi/databanka-uloh/ \
-  --sha256 THE_REPORTED_SHA256
+  --output /tmp/questions.json --assets /tmp/realieprep-question-images
 ```
 
-Always validate the generated bank, visual asset mapping, source date, hash, and applicable
-redistribution terms before publishing it.
+This developer command writes only to caller-selected local paths. Never commit or publish its
+output. Normal users should use the validated Admin workflow instead.
 
 ## Architecture and API
 
@@ -121,10 +135,10 @@ OpenAPI documentation is available at `/docs` on the backend service.
 
 ## Source content and rights
 
-The seeded question bank was retrieved from the official online database on 23 August 2026.
-Its canonical question-data SHA-256 at retrieval is recorded in the bundled database. The official site
-states that NPI ČR exclusively owns the question-bank copyright. See [NOTICE.md](NOTICE.md).
-The MIT license applies to application code, not third-party question text or images.
+The official site states that NPI ČR exclusively owns the question-bank copyright. RealiePrep does
+not redistribute that content: each administrator chooses whether to download it directly from the
+official source for local self-study. Downloaded questions and images stay under `./data`, are ignored
+by Git, and are not covered by the MIT license. See [NOTICE.md](NOTICE.md).
 
 ## Contributing
 

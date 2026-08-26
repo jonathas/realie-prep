@@ -1,4 +1,4 @@
-"""Download and validate the official online question bank for seed generation."""
+"""Download the official online question bank to caller-selected local paths for validation."""
 
 from __future__ import annotations
 

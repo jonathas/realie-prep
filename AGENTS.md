@@ -15,6 +15,7 @@
 - Preserve official question and option wording from the website.
 - Download and verify every official visual asset during synchronization.
 - Keep source URL, content hash, retrieval date, official IDs, and attribution current.
+- Never commit, bundle, or publish downloaded official questions, images, or populated databases.
 
 ## Database
 
