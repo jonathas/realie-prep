@@ -15,3 +15,9 @@ def test_distribution_is_private_and_empty_by_default() -> None:
     assert "${BIND_ADDRESS:-127.0.0.1}" in compose
     assert "scrape" not in entrypoint
     assert "cp " not in entrypoint
+
+
+def test_nginx_never_shadows_persistent_question_images() -> None:
+    nginx = (ROOT / "frontend" / "nginx.conf").read_text(encoding="utf-8")
+    assert "location /question-images/ {\n        proxy_pass http://api:8000;" in nginx
+    assert "@dynamic_question_image" not in nginx

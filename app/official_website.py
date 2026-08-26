@@ -33,6 +33,18 @@ class ScrapedQuestionBank:
     assets: dict[str, bytes]
 
 
+def question_bank_digest(bank: ExtractedQuestionBank, assets: dict[str, bytes]) -> str:
+    digest = hashlib.sha256(bank.model_dump_json().encode())
+    for filename in sorted(assets):
+        encoded_filename = filename.encode()
+        content = assets[filename]
+        digest.update(len(encoded_filename).to_bytes(8, "big"))
+        digest.update(encoded_filename)
+        digest.update(len(content).to_bytes(8, "big"))
+        digest.update(content)
+    return digest.hexdigest()
+
+
 def _text(tag: Tag) -> str:
     for superscript in tag.find_all("sup"):
         value = superscript.get_text(strip=True)
@@ -154,7 +166,7 @@ class OfficialWebsiteScraper:
         return ScrapedQuestionBank(
             bank=bank,
             source_url=str(response.url),
-            sha256=hashlib.sha256(bank.model_dump_json().encode()).hexdigest(),
+            sha256=question_bank_digest(bank, assets),
             assets=assets,
         )
 

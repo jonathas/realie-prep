@@ -1,4 +1,4 @@
-from app.official_website import parse_official_html
+from app.official_website import parse_official_html, question_bank_digest
 
 
 def test_official_html_parser_extracts_ids_dates_answers_and_images() -> None:
@@ -27,3 +27,21 @@ def test_official_html_parser_extracts_ids_dates_answers_and_images() -> None:
     assert question.source_updated_on.isoformat() == "2026-01-05"
     assert question.correct_answer == "B"
     assert images["1-1-prompt.jpg"] == "https://example.test/prompt.jpg"
+
+
+def test_bank_digest_changes_when_image_content_changes() -> None:
+    bank, _ = parse_official_html(
+        """
+        <h3 class="subH3">Topic</h3><ol class="patnact"><li>
+          <div class="text">Question?</div><ol class="alternatives">
+            <li><label>A) One</label></li><li><label>B) Two</label></li>
+            <li><label>C) Three</label></li><li><label>D) Four</label></li>
+            <li><span class="spravne">Správná odpověď: A</span></li>
+          </ol>
+        </li></ol>
+        """.encode(),
+        "https://example.test/",
+    )
+    old = question_bank_digest(bank, {"image.jpg": b"old image"})
+    updated = question_bank_digest(bank, {"image.jpg": b"updated image"})
+    assert old != updated

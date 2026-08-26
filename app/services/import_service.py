@@ -1,9 +1,11 @@
 import hashlib
 import json
+import os
 import shutil
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path, PurePosixPath
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -21,6 +23,8 @@ from app.models import (
     ValidationStatus,
 )
 from app.schemas import ExtractedQuestionBank, ImportPreviewOut
+
+IMAGE_URL_PREFIX = "/question-images/"
 
 
 class ImportValidationError(ValueError):
@@ -46,6 +50,11 @@ class ImportService:
     @staticmethod
     def digest(content: bytes) -> str:
         return hashlib.sha256(content).hexdigest()
+
+    @staticmethod
+    def _validate_sha256(sha256: str) -> None:
+        if len(sha256) != 64 or any(character not in "0123456789abcdef" for character in sha256):
+            raise ImportValidationError(["Invalid question-bank SHA-256 digest"])
 
     def validate(self, bank: ExtractedQuestionBank) -> list[str]:
         errors: list[str] = []
@@ -95,6 +104,13 @@ class ImportService:
         source_url: str | None = None,
         assets: dict[str, bytes] | None = None,
     ) -> PendingImport:
+        self._validate_sha256(sha256)
+        if assets:
+            invalid_names = [name for name in assets if Path(name).name != name]
+            if invalid_names:
+                raise ImportValidationError(
+                    ["Invalid image filename: " + ", ".join(sorted(invalid_names))]
+                )
         token = uuid.uuid4().hex
         self.settings.upload_dir.mkdir(parents=True, exist_ok=True)
         payload = {
@@ -112,6 +128,78 @@ class ImportService:
             for name, content in assets.items():
                 (asset_dir / name).write_bytes(content)
         return PendingImport(token, filename, sha256, source_url, bank)
+
+    @staticmethod
+    def _asset_filename(image_path: str) -> str:
+        if not image_path.startswith(IMAGE_URL_PREFIX):
+            raise ImportValidationError([f"Invalid question image path: {image_path}"])
+        relative = image_path.removeprefix(IMAGE_URL_PREFIX)
+        parsed = PurePosixPath(relative)
+        if not relative or parsed.name != relative or relative in {".", ".."}:
+            raise ImportValidationError([f"Invalid question image path: {image_path}"])
+        return relative
+
+    def _referenced_assets(self, bank: ExtractedQuestionBank) -> set[str]:
+        paths = [question.image_path for question in bank.questions]
+        paths.extend(
+            option.image_path for question in bank.questions for option in question.options
+        )
+        return {self._asset_filename(path) for path in paths if path is not None}
+
+    @staticmethod
+    def _versioned_image_path(image_path: str | None, sha256: str) -> str | None:
+        if image_path is None:
+            return None
+        filename = ImportService._asset_filename(image_path)
+        return f"{IMAGE_URL_PREFIX}{sha256}/{filename}"
+
+    @staticmethod
+    def _generation_matches(generation: Path, pending_assets: Path) -> bool:
+        generation_files = {path.name for path in generation.iterdir() if path.is_file()}
+        pending_files = {path.name for path in pending_assets.iterdir() if path.is_file()}
+        return generation_files == pending_files and all(
+            (generation / name).read_bytes() == (pending_assets / name).read_bytes()
+            for name in pending_files
+        )
+
+    def _promote_assets(self, pending: PendingImport) -> tuple[Path | None, bool]:
+        pending_assets = self.settings.upload_dir / pending.token
+        image_root = self.settings.upload_dir.parent / "question-images"
+        required_assets = self._referenced_assets(pending.bank)
+        available_assets = (
+            {path.name for path in pending_assets.iterdir() if path.is_file()}
+            if pending_assets.exists()
+            else set()
+        )
+        missing = sorted(required_assets - available_assets)
+        if missing:
+            raise ImportValidationError(
+                ["Downloaded images are incomplete: " + ", ".join(missing)]
+            )
+        if not available_assets:
+            return None, False
+
+        image_root.mkdir(parents=True, exist_ok=True)
+        generation = image_root / pending.sha256
+        if generation.exists():
+            if generation.is_dir() and self._generation_matches(generation, pending_assets):
+                return generation, False
+            raise ImportValidationError(
+                ["An image generation with this bank digest already exists but differs"]
+            )
+        try:
+            os.rename(pending_assets, generation)
+        except OSError:
+            if generation.is_dir() and self._generation_matches(generation, pending_assets):
+                return generation, False
+            raise
+        return generation, True
+
+    def _restore_pending_assets(self, generation: Path | None, token: str) -> None:
+        if generation is None or not generation.exists():
+            return
+        pending_assets = self.settings.upload_dir / token
+        os.replace(generation, pending_assets)
 
     def load_pending(self, token: str) -> PendingImport:
         if not token.isalnum():
@@ -148,7 +236,9 @@ class ImportService:
         errors = self.validate(pending.bank)
         if errors:
             raise ImportValidationError(errors)
+        self._validate_sha256(pending.sha256)
         self.ensure_new_hash(pending.sha256)
+        generation, owns_generation = self._promote_assets(pending)
         try:
             # Re-import replaces the active bank and progress atomically.
             for model in (
@@ -192,7 +282,9 @@ class ImportService:
                     text=extracted.text,
                     correct_option=extracted.correct_answer,
                     source_page=extracted.source_page,
-                    image_path=extracted.image_path,
+                    image_path=self._versioned_image_path(
+                        extracted.image_path, pending.sha256
+                    ),
                 )
                 self.db.add(question)
                 self.db.flush()
@@ -201,20 +293,18 @@ class ImportService:
                         question_id=question.id,
                         label=o.label,
                         text=o.text,
-                        image_path=o.image_path,
+                        image_path=self._versioned_image_path(o.image_path, pending.sha256),
                     )
                     for o in extracted.options
                 )
             self.db.commit()
         except Exception:
             self.db.rollback()
+            if owns_generation:
+                self._restore_pending_assets(generation, token)
             raise
         (self.settings.upload_dir / f"{token}.json").unlink(missing_ok=True)
         pending_assets = self.settings.upload_dir / token
         if pending_assets.exists():
-            destination = self.settings.upload_dir.parent / "question-images"
-            destination.mkdir(parents=True, exist_ok=True)
-            for asset in pending_assets.iterdir():
-                shutil.copy2(asset, destination / asset.name)
             shutil.rmtree(pending_assets)
         return source

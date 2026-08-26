@@ -1,4 +1,5 @@
 from collections.abc import Generator
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
@@ -14,13 +15,13 @@ from app.models import Category, Question, QuestionOption, SourceDocument, Valid
 
 
 @pytest.fixture
-def settings(tmp_path: object) -> Settings:
+def settings(tmp_path: Path) -> Settings:
     return Settings(
         expected_question_count=20,
         expected_category_count=2,
         expected_questions_per_category=10,
         weak_topic_min_attempts=2,
-        upload_dir=tmp_path,  # type: ignore[arg-type]
+        upload_dir=tmp_path / "uploads",
     )
 
 
