@@ -97,6 +97,22 @@ def test_exhaustion_starts_review_only_after_every_question_was_seen(
     assert repeat_flags == [True] * 10
 
 
+def test_exhausted_default_selection_skips_questions_in_current_session(
+    db: Session, settings: Settings, question_bank: object
+) -> None:
+    service = QuizService(db, settings)
+    first = service.get_or_create_current().batches[0]
+    submit_with_wrong_views(service, first.id, [q.id for q in first.questions], set())
+    second = service.new_batch(NewBatchIn())
+    submit_with_wrong_views(service, second.id, [q.id for q in second.questions], set())
+
+    first_ids = {question.question_id for question in first.questions}
+    selected = service.selector.select_ids(
+        10, allow_repeats=False, mode=SelectionMode.UNSEEN, excluded=first_ids
+    )
+    assert set(selected).isdisjoint(first_ids)
+
+
 def test_intentional_review_repeats_an_incorrect_question_before_exhaustion(
     db: Session, settings: Settings, question_bank: object
 ) -> None:

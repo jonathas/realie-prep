@@ -49,19 +49,20 @@ class QuestionSelectionService:
         self.db = db
         self.settings = settings
 
-    def _unseen_ids(self, limit: int) -> list[int]:
+    def _unseen_ids(self, limit: int, excluded: set[int] | None = None) -> list[int]:
         viewed = select(QuestionView.question_id)
+        query = select(Question.id).where(Question.id.not_in(viewed))
+        if excluded:
+            query = query.where(Question.id.not_in(excluded))
         return list(
             self.db.scalars(
-                select(Question.id)
-                .where(Question.id.not_in(viewed))
-                .order_by(func.random())
-                .limit(limit)
-                .with_for_update(skip_locked=True)
+                query.order_by(func.random()).limit(limit).with_for_update(skip_locked=True)
             )
         )
 
-    def _review_ids(self, limit: int, mode: SelectionMode) -> list[int]:
+    def _review_ids(
+        self, limit: int, mode: SelectionMode, excluded: set[int] | None = None
+    ) -> list[int]:
         incorrect_count = (
             select(func.count(AnswerAttempt.id))
             .where(
@@ -87,6 +88,8 @@ class QuestionSelectionService:
             .limit(3)
         )
         query = select(Question.id)
+        if excluded:
+            query = query.where(Question.id.not_in(excluded))
         if mode == SelectionMode.MISSED_TWICE:
             query = query.where(incorrect_count >= 2).order_by(incorrect_count.desc(), last_seen)
         elif mode == SelectionMode.INCORRECT:
@@ -103,26 +106,70 @@ class QuestionSelectionService:
             query = query.order_by(priority, incorrect_count.desc(), last_seen)
         return list(self.db.scalars(query.limit(limit)))
 
-    def select_ids(self, limit: int, allow_repeats: bool, mode: SelectionMode) -> list[int]:
+    def select_ids(
+        self,
+        limit: int,
+        allow_repeats: bool,
+        mode: SelectionMode,
+        excluded: set[int] | None = None,
+    ) -> list[int]:
+        excluded = excluded or set()
         if mode == SelectionMode.UNSEEN and not allow_repeats:
-            unseen = self._unseen_ids(limit)
+            unseen = self._unseen_ids(limit, excluded)
             if len(unseen) == limit:
                 return unseen
             review = [
-                q for q in self._review_ids(limit * 2, SelectionMode.MIXED) if q not in unseen
+                q
+                for q in self._review_ids(limit * 2, SelectionMode.MIXED, excluded)
+                if q not in unseen
             ]
-            return unseen + review[: limit - len(unseen)]
-        ids = self._review_ids(limit, mode if mode != SelectionMode.UNSEEN else SelectionMode.MIXED)
+            ids = unseen + review[: limit - len(unseen)]
+            if len(ids) < limit:
+                existing = set(ids)
+                available = list(
+                    self.db.scalars(
+                        select(Question.id)
+                        .where(Question.id.not_in(existing | excluded))
+                        .order_by(func.random())
+                        .limit(limit - len(ids))
+                    )
+                )
+                if len(available) < limit - len(ids):
+                    available.extend(
+                        self.db.scalars(
+                            select(Question.id)
+                            .where(Question.id.not_in(existing | set(available)))
+                            .order_by(func.random())
+                            .limit(limit - len(ids) - len(available))
+                        )
+                    )
+                ids.extend(available)
+            return ids
+        ids = self._review_ids(
+            limit,
+            mode if mode != SelectionMode.UNSEEN else SelectionMode.MIXED,
+            excluded if not allow_repeats else None,
+        )
         if len(ids) < limit:
             existing = set(ids)
-            ids.extend(
+            available = list(
                 self.db.scalars(
                     select(Question.id)
-                    .where(Question.id.not_in(existing))
+                    .where(Question.id.not_in(existing | excluded))
                     .order_by(func.random())
                     .limit(limit - len(ids))
                 )
             )
+            if len(available) < limit - len(ids):
+                available.extend(
+                    self.db.scalars(
+                        select(Question.id)
+                        .where(Question.id.not_in(existing | set(available)))
+                        .order_by(func.random())
+                        .limit(limit - len(ids) - len(available))
+                    )
+                )
+            ids.extend(available)
         return ids
 
 
@@ -186,7 +233,19 @@ class QuizService:
             # Flush before selection to acquire SQLite's writer lock. PostgreSQL uses
             # row locking in the selector. The view records commit with this batch.
             self.db.flush()
-            ids = self.selector.select_ids(10, request.allow_repeats, request.mode)
+            session_question_ids = set(
+                self.db.scalars(
+                    select(QuestionView.question_id)
+                    .join(QuizBatch, QuizBatch.id == QuestionView.quiz_batch_id)
+                    .where(QuizBatch.quiz_session_id == session.id)
+                )
+            )
+            ids = self.selector.select_ids(
+                10,
+                request.allow_repeats,
+                request.mode,
+                excluded=session_question_ids if not request.allow_repeats else None,
+            )
             if not ids:
                 self.db.rollback()
                 raise QuizError("No questions are available for this study mode")
