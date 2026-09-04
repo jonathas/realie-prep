@@ -118,11 +118,21 @@ class QuestionSelectionService:
             unseen = self._unseen_ids(limit, excluded)
             if len(unseen) == limit:
                 return unseen
-            review = [
-                q
-                for q in self._review_ids(limit * 2, SelectionMode.MIXED, excluded)
-                if q not in unseen
-            ]
+            if unseen:
+                review = [
+                    q
+                    for q in self._review_ids(limit * 2, SelectionMode.MIXED, excluded)
+                    if q not in unseen
+                ]
+            else:
+                review = list(
+                    self.db.scalars(
+                        select(Question.id)
+                        .where(Question.id.not_in(excluded))
+                        .order_by(func.random())
+                        .limit(limit * 2)
+                    )
+                )
             ids = unseen + review[: limit - len(unseen)]
             if len(ids) < limit:
                 existing = set(ids)
