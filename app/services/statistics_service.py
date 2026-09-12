@@ -8,6 +8,8 @@ from app.models import AnswerAttempt, Category, MistakeType, Question, QuestionV
 
 
 class StatisticsService:
+    RECENT_ACCURACY_WINDOW = 30
+
     def __init__(self, db: Session, settings: Settings) -> None:
         self.db = db
         self.settings = settings
@@ -38,6 +40,16 @@ class StatisticsService:
             or 0
         )
         first_accuracy = first_correct / first_total * 100 if first_total else 0.0
+        recent_results = list(
+            self.db.scalars(
+                select(AnswerAttempt.correct)
+                .order_by(AnswerAttempt.answered_at.desc(), AnswerAttempt.id.desc())
+                .limit(self.RECENT_ACCURACY_WINDOW)
+            )
+        )
+        recent_accuracy = (
+            sum(recent_results) / len(recent_results) * 100 if recent_results else 0.0
+        )
         categories = self._categories()
         missed = self._missed_twice()
         mistake_counts = {
@@ -57,8 +69,9 @@ class StatisticsService:
             "incorrect": attempts - correct,
             "overall_accuracy": round(correct / attempts * 100, 1) if attempts else 0,
             "first_attempt_accuracy": round(first_accuracy, 1),
+            "recent_accuracy": round(recent_accuracy, 1),
             "passing_grade_percent": self.settings.passing_grade_percent,
-            "passing_difference": round(first_accuracy - self.settings.passing_grade_percent, 1),
+            "passing_difference": round(recent_accuracy - self.settings.passing_grade_percent, 1),
             "mistakes": mistake_counts,
             "categories": categories,
             "weakest_categories": [

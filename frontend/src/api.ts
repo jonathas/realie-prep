@@ -15,7 +15,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  get: <T>(path: string, admin = false) => request<T>(path, { headers: admin ? adminHeaders() : {} }),
+  get: <T>(path: string, admin = false) => request<T>(path, { cache: 'no-store', headers: admin ? adminHeaders() : {} }),
   post: <T>(path: string, body?: unknown, admin = false) => request<T>(path, {
     method: 'POST', headers: { 'Content-Type': 'application/json', ...(admin ? adminHeaders() : {}) }, body: body === undefined ? undefined : JSON.stringify(body),
   }),
